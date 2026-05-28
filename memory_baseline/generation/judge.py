@@ -115,7 +115,7 @@ class OpenAICompatibleJudge:
             "model": self.model_name,
             "messages": messages,
             "temperature": 0,
-            "max_tokens": 10,
+            "max_tokens": 2048,
         }
         cached = cached_response("judge", self.model_name, payload_obj)
         if cached is not None:

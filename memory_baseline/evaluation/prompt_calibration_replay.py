@@ -356,7 +356,7 @@ def run_judge_stage(args: argparse.Namespace, run_dir: Path, samples: list[Any])
             prompt = get_calibrated_longmemeval_prompt(sample.question_type, sample.question, sample.answer, response, abstention=is_abstention_sample(sample))
         messages = [{"role": "user", "content": prompt}]
         started = time.time()
-        body = chat(args.judge_model, args.judge_base_url, os.getenv("JUDGE_API_KEY") or os.getenv("OPENAI_API_KEY"), messages, f"judge_{args.judge_style}", max_tokens=10)
+        body = chat(args.judge_model, args.judge_base_url, os.getenv("JUDGE_API_KEY") or os.getenv("OPENAI_API_KEY"), messages, f"judge_{args.judge_style}", max_tokens=2048)
         latency = time.time() - started
         content = body["choices"][0].get("message", {}).get("content", "").strip()
         usage = dict(body.get("usage", {}))
