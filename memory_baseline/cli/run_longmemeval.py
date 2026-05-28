@@ -556,17 +556,19 @@ def run_judge_stage(args: argparse.Namespace, run_dir: Path, samples: list[LongM
     if workers > 1:
         with ThreadPoolExecutor(max_workers=workers) as executor:
             futures = {executor.submit(judge_one, question_id): question_id for question_id in pending}
-            for future in as_completed(futures):
+            for done, future in enumerate(as_completed(futures), start=1):
                 row = future.result()
                 logs[row["question_id"]] = row
                 _append_jsonl_record(log_path, row)
                 _append_jsonl_record(eval_path, _eval_row(sample_by_id[row["question_id"]], predictions[row["question_id"]], row))
+                print(f"[judge {done}/{len(pending)}] {row['question_id']} label={row['label']}", flush=True)
     else:
-        for question_id in pending:
+        for done, question_id in enumerate(pending, start=1):
             row = judge_one(question_id)
             logs[row["question_id"]] = row
             _append_jsonl_record(log_path, row)
             _append_jsonl_record(eval_path, _eval_row(sample_by_id[row["question_id"]], predictions[row["question_id"]], row))
+            print(f"[judge {done}/{len(pending)}] {row['question_id']} label={row['label']}", flush=True)
 
     ordered_logs = [logs[question_id] for question_id in predictions if question_id in logs]
     if existing and not pending:

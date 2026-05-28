@@ -70,17 +70,19 @@ def main(argv: list[str] | None = None) -> None:
     if args.parallelism > 1:
         with ThreadPoolExecutor(max_workers=args.parallelism) as executor:
             futures = {executor.submit(judge_one, qid): qid for qid in pending}
-            for future in as_completed(futures):
+            for done, future in enumerate(as_completed(futures), start=1):
                 row = future.result()
                 logs[row["question_id"]] = row
                 _append_jsonl_record(log_path, row)
                 _append_jsonl_record(eval_path, _eval_row(sample_by_id[row["question_id"]], predictions[row["question_id"]], row))
+                print(f"[judge {done}/{len(pending)}] {row['question_id']} label={row['label']}", flush=True)
     else:
-        for qid in pending:
+        for done, qid in enumerate(pending, start=1):
             row = judge_one(qid)
             logs[row["question_id"]] = row
             _append_jsonl_record(log_path, row)
             _append_jsonl_record(eval_path, _eval_row(sample_by_id[row["question_id"]], predictions[row["question_id"]], row))
+            print(f"[judge {done}/{len(pending)}] {row['question_id']} label={row['label']}", flush=True)
 
     ordered_logs = [logs[qid] for qid in predictions if qid in logs]
     if existing and not pending:
