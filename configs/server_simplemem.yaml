@@ -1,0 +1,35 @@
+# Copied from the server vLLM setup into this repository's own config shape.
+# Secrets are intentionally environment variables, not checked-in values.
+
+datasets:
+  longmemeval_s: ../LongMemEval/data/longmemeval_s_cleaned.json
+  longmemeval_s_subset50: data/longmemeval/longmemeval_s_subset_50_seed42.json
+  locomo10: data/locomo/locomo10.json
+
+embedding:
+  backend: api
+  model: Qwen/Qwen3-Embedding-0.6B
+  base_url: http://127.0.0.1:8001/v1
+  api_key_env: EMBEDDING_API_KEY
+  dimension: 1024
+  max_input_bytes_env: EMBEDDING_MAX_INPUT_BYTES
+  model_4b: Qwen/Qwen3-Embedding-4B
+  model_4b_dimension: 2560
+  context_length: 32768
+  cache_envs:
+    HF_HOME: .cache/huggingface
+    TRANSFORMERS_CACHE: .cache/huggingface
+
+answerer:
+  base_url: http://127.0.0.1:8000/v1
+  model: Qwen/Qwen3-30B-A3B-Instruct-2507
+  api_key_envs: [ANSWER_API_KEY, ANSWERER_API_KEY, OPENAI_API_KEY]
+
+judge:
+  base_url: https://api.deepseek.com
+  model: deepseek-v4-flash
+  api_key_env: JUDGE_API_KEY
+
+runtime:
+  default_question_limit: 20
+  default_parallelism: 4

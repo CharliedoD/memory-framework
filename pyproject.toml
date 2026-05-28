@@ -1,0 +1,30 @@
+[project]
+name = "memory-framework"
+version = "0.1.0"
+description = "Clean Raw-RAG memory baselines for LongMemEval."
+requires-python = ">=3.10"
+dependencies = [
+  "numpy>=1.26",
+  "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+hf = [
+  "nltk>=3.8",
+  "sentence-transformers>=3.0",
+]
+
+[dependency-groups]
+dev = [
+  "pytest>=7.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+
+[tool.hatch.build.targets.wheel]
+packages = ["memory_baseline"]

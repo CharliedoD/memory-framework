@@ -1,0 +1,31 @@
+data: ../LongMemEval/data/longmemeval_s_cleaned.json
+locomo_data: data/locomo/locomo_dev_conv0.json
+output_dir: runs
+chunk_mode: turn
+embedding_model: Qwen/Qwen3-Embedding-0.6B
+embedding_backend: api
+answer_model: Qwen/Qwen3-30B-A3B-Instruct-2507
+answer_base_url: http://127.0.0.1:8000/v1
+judge_model: deepseek-v4-flash
+judge_base_url: https://api.deepseek.com
+top_k_list: [5, 10, 20, 50, 100, 200]
+message_range_list: [0, 1, 2]
+question_limit: 20
+token_accounting:
+  build: embedding_input_tokens
+  query: answer_prompt_and_completion_tokens
+  judge: separated_and_excluded_from_method_cost
+embedder:
+  base_url_env: EMBEDDING_BASE_URL
+  api_key_env: EMBEDDING_API_KEY
+  model_env: EMBEDDING_MODEL
+  backend_env: EMBEDDING_BACKEND
+  local_hf_cache_envs: [HF_HOME, TRANSFORMERS_CACHE]
+answerer:
+  base_url_envs: [ANSWER_BASE_URL, ANSWERER_BASE_URL, OPENAI_BASE_URL]
+  api_key_envs: [ANSWER_API_KEY, ANSWERER_API_KEY, OPENAI_API_KEY]
+  model_envs: [ANSWER_MODEL, ANSWERER_MODEL, LLM_MODEL]
+judge:
+  base_url_env: JUDGE_BASE_URL
+  api_key_env: JUDGE_API_KEY
+  model_env: JUDGE_MODEL

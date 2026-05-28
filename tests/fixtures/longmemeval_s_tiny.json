@@ -1,0 +1,58 @@
+[
+  {
+    "question_id": "tiny_1",
+    "question_type": "single-session-user",
+    "question": "Where did I put the blue notebook?",
+    "answer": "In the desk drawer.",
+    "question_date": "2023-05-03",
+    "haystack_session_ids": ["sess_a", "sess_b"],
+    "haystack_dates": ["2023-04-17 09:20", "2023-05-02 14:10"],
+    "haystack_sessions": [
+      [
+        {"role": "user", "content": "I bought a red pen."},
+        {"role": "assistant", "content": "Noted."}
+      ],
+      [
+        {"role": "user", "content": "I put the blue notebook in the desk drawer.", "has_answer": true},
+        {"role": "assistant", "content": "I will remember that."}
+      ]
+    ],
+    "answer_session_ids": ["sess_b"]
+  },
+  {
+    "question_id": "tiny_2",
+    "question_type": "temporal-reasoning",
+    "question": "What did I decide today about the gym?",
+    "answer": "You decided to go on Fridays.",
+    "question_date": "2023-05-04",
+    "haystack_session_ids": ["sess_c", "sess_d"],
+    "haystack_dates": ["2023-05-01", "2023-05-04 08:30"],
+    "haystack_sessions": [
+      [
+        {"role": "user", "content": "I might go to the gym on Mondays."},
+        {"role": "assistant", "content": "That sounds tentative."}
+      ],
+      [
+        {"role": "user", "content": "Today I decided Fridays are my gym days.", "has_answer": true},
+        {"role": "assistant", "content": "Fridays are now your gym days."}
+      ]
+    ],
+    "answer_session_ids": ["sess_d"]
+  },
+  {
+    "question_id": "tiny_3_abs",
+    "question_type": "single-session-user",
+    "question": "What is my favorite opera?",
+    "answer": "Not available.",
+    "question_date": "2023-05-05",
+    "haystack_session_ids": ["sess_e"],
+    "haystack_dates": ["2023-05-01"],
+    "haystack_sessions": [
+      [
+        {"role": "user", "content": "I like jazz."},
+        {"role": "assistant", "content": "Jazz noted."}
+      ]
+    ],
+    "answer_session_ids": []
+  }
+]

@@ -1,0 +1,51 @@
+result:
+  run_id: lme_s_full500_top20_mr1_ettin150m_turn_keep10_gpt41mini_typed_official_20260525
+  qa_accuracy: 0.814
+  correct: 407
+  total: 500
+
+data: data/longmemeval/longmemeval_s_cleaned.json
+output_dir: runs
+
+retrieval:
+  run_id: lme_s_full500_top20_mr1_for_ettin_keep10_20260525_source
+  top_k: 20
+  message_range: 1
+  chunk_mode: turn
+  embedding_text_mode: metadata_content
+  retrieval_method: hybrid
+  temporal_boost: 0.01
+  embedding_backend: hf
+  embedding_model: Qwen/Qwen3-Embedding-0.6B
+  num_shards: 3
+
+rerank:
+  run_id: lme_s_full500_top20_mr1_ettin150m_turn_keep10_fa2_20260525
+  source_run: runs/lme_s_full500_top20_mr1_for_ettin_keep10_20260525_source
+  module: memory_baseline.evaluation.reranker_ablation
+  reranker_kind: cross-encoder
+  model: cross-encoder/ettin-reranker-150m-v1
+  candidate_unit: turn
+  keep_turns: 10
+  batch_size: 16
+  max_length: 7999
+  attn_implementation: flash_attention_2
+  gpu_shards: 3
+
+answer_judge:
+  run_id: lme_s_full500_top20_mr1_ettin150m_turn_keep10_gpt41mini_typed_official_20260525
+  source_run: runs/lme_s_full500_top20_mr1_ettin150m_turn_keep10_fa2_20260525
+  module: memory_baseline.evaluation.prompt_calibration_replay
+  answer_model: gpt-4.1-mini
+  answer_style: typed_route_mem0_kumstr
+  judge_model: DeepSeek-V4-Flash
+  judge_style: official
+  parallelism: 4
+
+env:
+  embedding_base_url: EMBEDDING_BASE_URL
+  embedding_api_key: EMBEDDING_API_KEY
+  answer_base_url: ANSWER_BASE_URL
+  answer_api_key: ANSWER_API_KEY
+  judge_base_url: JUDGE_BASE_URL
+  judge_api_key: JUDGE_API_KEY
