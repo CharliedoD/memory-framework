@@ -4,6 +4,7 @@ import argparse
 import copy
 import json
 import os
+from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from queue import Queue
@@ -235,13 +236,29 @@ def run_topk_pipeline(args: argparse.Namespace, cutoffs: list[int]) -> dict[str,
     return {"run_dir": str(run_dir), "num_samples": len(samples), "top_k_list": cutoffs}
 
 
+def sample_memory_id(sample: LongMemEvalSample) -> str:
+    return sample.question_id
+
+
+def group_by_memory(
+    indexed_samples: list[tuple[int, LongMemEvalSample]],
+) -> list[tuple[str, list[tuple[int, LongMemEvalSample]]]]:
+    groups: OrderedDict[str, list[tuple[int, LongMemEvalSample]]] = OrderedDict()
+    for index, sample in indexed_samples:
+        groups.setdefault(sample_memory_id(sample), []).append((index, sample))
+    return list(groups.items())
+
+
 def run_build_stage(args: argparse.Namespace, run_dir: Path, samples: list[LongMemEvalSample]) -> list[dict[str, Any]]:
     embedder = make_embedder(args.embedding_model, args.embedding_base_url, backend=_backend_arg(args.embedding_backend))
     skip_existing = args.skip_existing or args.resume
     workers = max(1, args.parallelism)
+    indexed_samples = list(enumerate(samples))
+    groups = group_by_memory(indexed_samples)
 
-    def build_one(sample: LongMemEvalSample) -> dict[str, Any]:
-        return build_question_store(
+    def build_group(memory_id: str, group: list[tuple[int, LongMemEvalSample]]) -> tuple[str, dict[str, Any]]:
+        sample = group[0][1]
+        stat = build_question_store(
             sample,
             run_dir,
             embedder,
@@ -252,21 +269,34 @@ def run_build_stage(args: argparse.Namespace, run_dir: Path, samples: list[LongM
             embedding_text_mode=args.embedding_text_mode,
             typed_sidecar=args.typed_sidecar,
         )
+        return memory_id, stat
 
     stats_by_id: dict[str, dict[str, Any]] = {}
-    if workers <= 1 or len(samples) <= 1:
-        for done, sample in enumerate(samples, start=1):
-            stat = build_one(sample)
-            stats_by_id[sample.question_id] = stat
-            print(f"[build {done}/{len(samples)}] {sample.question_id} turns={stat.get('num_turns')}", flush=True)
+    if workers <= 1 or len(groups) <= 1:
+        for done, (memory_id, group) in enumerate(groups, start=1):
+            _memory_id, stat = build_group(memory_id, group)
+            for _row, sample in group:
+                stats_by_id[sample.question_id] = stat
+            first_index = group[0][0] + 1
+            print(
+                f"[build {done}/{len(groups)}] sample={first_index}/{len(samples)} "
+                f"memory {memory_id} turns={stat.get('num_turns')}",
+                flush=True,
+            )
     else:
         with ThreadPoolExecutor(max_workers=workers) as executor:
-            futures = {executor.submit(build_one, sample): sample for sample in samples}
+            futures = {executor.submit(build_group, memory_id, group): (memory_id, group) for memory_id, group in groups}
             for done, future in enumerate(as_completed(futures), start=1):
-                sample = futures[future]
-                stat = future.result()
-                stats_by_id[sample.question_id] = stat
-                print(f"[build {done}/{len(samples)}] {sample.question_id} turns={stat.get('num_turns')}", flush=True)
+                memory_id, group = futures[future]
+                _memory_id, stat = future.result()
+                for _row, sample in group:
+                    stats_by_id[sample.question_id] = stat
+                first_index = group[0][0] + 1
+                print(
+                    f"[build {done}/{len(groups)}] sample={first_index}/{len(samples)} "
+                    f"memory {memory_id} turns={stat.get('num_turns')}",
+                    flush=True,
+                )
 
     stats = [stats_by_id[sample.question_id] for sample in samples]
     write_jsonl(run_dir / "build_stats.jsonl", stats)
@@ -278,40 +308,50 @@ def run_retrieve_stage(args: argparse.Namespace, run_dir: Path, samples: list[Lo
     query_batch = embed_texts_cached(embedder, [sample.question for sample in samples], cache_root=Path(".cache") / "embeddings")
     query_tokens = [estimate_tokens(sample.question) for sample in samples]
     workers = max(1, args.parallelism)
+    indexed_samples = list(enumerate(samples))
+    groups = group_by_memory(indexed_samples)
 
-    def retrieve_one(row_and_sample: tuple[int, LongMemEvalSample]) -> dict[str, Any]:
-        row, sample = row_and_sample
-        store_dir = question_store_dir(run_dir, sample.question_id)
+    def retrieve_group(memory_id: str, group: list[tuple[int, LongMemEvalSample]]) -> tuple[str, list[dict[str, Any]]]:
+        store_dir = question_store_dir(run_dir, memory_id)
         if not (store_dir / "embeddings.npy").exists():
-            raise FileNotFoundError(f"Missing store for {sample.question_id}; run --mode build first.")
+            raise FileNotFoundError(f"Missing store for {memory_id}; run --mode build first.")
         _check_store(store_dir, embedder.model_name, args.chunk_mode, args.embedding_text_mode)
         retriever = DenseRetriever(QuestionStore(store_dir), embedder, cache_root=Path(".cache") / "embeddings")
-        return retriever.retrieve(
-            sample,
-            top_k=args.top_k,
-            message_range=args.message_range,
-            max_evidence_tokens=args.max_evidence_tokens,
-            retrieval_method=args.retrieval_method,
-            temporal_boost=args.temporal_boost,
-            query_vector=query_batch.vectors[row],
-            query_embedding_tokens=query_tokens[row],
-            typed_sidecar=args.typed_sidecar,
-        )
+        results = []
+        for row, sample in group:
+            results.append(
+                retriever.retrieve(
+                    sample,
+                    top_k=args.top_k,
+                    message_range=args.message_range,
+                    max_evidence_tokens=args.max_evidence_tokens,
+                    retrieval_method=args.retrieval_method,
+                    temporal_boost=args.temporal_boost,
+                    query_vector=query_batch.vectors[row],
+                    query_embedding_tokens=query_tokens[row],
+                    typed_sidecar=args.typed_sidecar,
+                )
+            )
+        return memory_id, results
 
     results_by_id: dict[str, dict[str, Any]] = {}
-    indexed_samples = list(enumerate(samples))
-    if workers <= 1 or len(indexed_samples) <= 1:
-        for done, item in enumerate(indexed_samples, start=1):
-            result = retrieve_one(item)
-            results_by_id[result["question_id"]] = result
-            print(f"[retrieve {done}/{len(samples)}] {result['question_id']}", flush=True)
+    if workers <= 1 or len(groups) <= 1:
+        for done, (memory_id, group) in enumerate(groups, start=1):
+            _memory_id, group_results = retrieve_group(memory_id, group)
+            for result in group_results:
+                results_by_id[result["question_id"]] = result
+            first_index = group[0][0] + 1
+            print(f"[retrieve {done}/{len(groups)}] sample={first_index}/{len(samples)} memory {memory_id}", flush=True)
     else:
         with ThreadPoolExecutor(max_workers=workers) as executor:
-            futures = {executor.submit(retrieve_one, item): item[1] for item in indexed_samples}
+            futures = {executor.submit(retrieve_group, memory_id, group): (memory_id, group) for memory_id, group in groups}
             for done, future in enumerate(as_completed(futures), start=1):
-                result = future.result()
-                results_by_id[result["question_id"]] = result
-                print(f"[retrieve {done}/{len(samples)}] {result['question_id']}", flush=True)
+                memory_id, group = futures[future]
+                _memory_id, group_results = future.result()
+                for result in group_results:
+                    results_by_id[result["question_id"]] = result
+                first_index = group[0][0] + 1
+                print(f"[retrieve {done}/{len(groups)}] sample={first_index}/{len(samples)} memory {memory_id}", flush=True)
 
     results = [results_by_id[sample.question_id] for sample in samples]
     write_jsonl(run_dir / "retrieval_results.jsonl", results)
@@ -342,13 +382,6 @@ def run_answer_stage(args: argparse.Namespace, run_dir: Path, samples: list[Long
         log_path.unlink(missing_ok=True)
 
     def answer_one(sample: LongMemEvalSample) -> tuple[dict[str, str], dict[str, Any]]:
-        if sample.question_id in existing_predictions:
-            log = dict(existing_logs.get(sample.question_id, {"question_id": sample.question_id}))
-            log["skipped_existing"] = True
-            return (
-                {"question_id": sample.question_id, "hypothesis": existing_predictions[sample.question_id]},
-                log,
-            )
         result = retrieval_by_id[sample.question_id]
         pruner = pruner_queue.get() if pruner_queue.qsize() else None
         try:
@@ -415,29 +448,54 @@ def run_answer_stage(args: argparse.Namespace, run_dir: Path, samples: list[Long
         }
         return {"question_id": sample.question_id, "hypothesis": answer.hypothesis}, log
 
-    pending_samples = [sample for sample in samples if sample.question_id not in existing_predictions]
+    def answer_group(
+        memory_id: str,
+        group: list[tuple[int, LongMemEvalSample]],
+    ) -> tuple[str, list[dict[str, str]], list[dict[str, Any]]]:
+        group_predictions = []
+        group_logs = []
+        for _row, sample in group:
+            prediction, log = answer_one(sample)
+            group_predictions.append(prediction)
+            group_logs.append(log)
+        return memory_id, group_predictions, group_logs
+
+    indexed_samples = list(enumerate(samples))
+    groups = group_by_memory(indexed_samples)
+    pending_groups = [
+        (memory_id, [(row, sample) for row, sample in group if sample.question_id not in existing_predictions])
+        for memory_id, group in groups
+    ]
+    pending_groups = [(memory_id, group) for memory_id, group in pending_groups if group]
     predictions: list[dict[str, str]] = [
         {"question_id": question_id, "hypothesis": hypothesis}
         for question_id, hypothesis in existing_predictions.items()
     ]
     logs: list[dict[str, Any]] = list(existing_logs.values())
-    if workers > 1:
+    if workers > 1 and len(pending_groups) > 1:
         with ThreadPoolExecutor(max_workers=workers) as executor:
-            futures = [executor.submit(answer_one, sample) for sample in pending_samples]
-            for future in as_completed(futures):
-                prediction, log = future.result()
+            futures = {executor.submit(answer_group, memory_id, group): (memory_id, group) for memory_id, group in pending_groups}
+            for done, future in enumerate(as_completed(futures), start=1):
+                memory_id, group = futures[future]
+                _memory_id, group_predictions, group_logs = future.result()
+                for prediction, log in zip(group_predictions, group_logs):
+                    predictions.append(prediction)
+                    logs.append(log)
+                    _append_jsonl_record(pred_path, prediction)
+                    _append_jsonl_record(log_path, log)
+                first_index = group[0][0] + 1
+                print(f"[answer {done}/{len(pending_groups)}] sample={first_index}/{len(samples)} memory {memory_id}", flush=True)
+    else:
+        for done, (memory_id, group) in enumerate(pending_groups, start=1):
+            _memory_id, group_predictions, group_logs = answer_group(memory_id, group)
+            for prediction, log in zip(group_predictions, group_logs):
                 predictions.append(prediction)
                 logs.append(log)
                 _append_jsonl_record(pred_path, prediction)
                 _append_jsonl_record(log_path, log)
-    else:
-        for sample in pending_samples:
-            prediction, log = answer_one(sample)
-            predictions.append(prediction)
-            logs.append(log)
-            _append_jsonl_record(pred_path, prediction)
-            _append_jsonl_record(log_path, log)
-    if existing_predictions and not pending_samples:
+            first_index = group[0][0] + 1
+            print(f"[answer {done}/{len(pending_groups)}] sample={first_index}/{len(samples)} memory {memory_id}", flush=True)
+    if existing_predictions and not pending_groups:
         write_predictions(pred_path, predictions)
         write_jsonl(log_path, logs)
     return logs
